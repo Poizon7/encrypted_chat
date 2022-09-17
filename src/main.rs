@@ -309,7 +309,7 @@ fn Encrypt(plain: &mut String, key: &[u8; 240]) -> Vec<[u8; 16]> {
     let mut message = Vec::new();
 
     for i in 0..(&plain.len() / 16) {
-         message.push(matrix[i]);
+        message.push(matrix[i]);
     }
 
     message
@@ -414,18 +414,13 @@ fn Recive(address: SocketAddr, key: &[u8; 240]) {
 
             let mut crypt = Vec::new();
 
-            println!("{:?}", buf);
-
             for i in 0..n / 16 {
                 let mut temp = [0; 16];
                 for j in 0..16 {
                     temp[j] = buf[i * 16 + j];
                 }
-                println!("{:?}", temp);
                 crypt.push(temp);
             }
-
-            println!("{:?}", crypt);
 
             let message = Decrypt(crypt, &key);
 
@@ -488,7 +483,10 @@ async fn main() {
     let (mut socket, address) = listener.accept().await.expect("Could not accept listner");
 
     println!("{}", address);
-    let address = SocketAddr::new(address.ip(), port.trim().parse().expect("failed to pares port"));
+    let address = SocketAddr::new(
+        address.ip(),
+        port.trim().parse().expect("failed to pares port"),
+    );
     println!("{}", address);
 
     if text.trim() != "c" {
@@ -518,29 +516,3 @@ async fn main() {
         }
     }
 }
-
-/*
-fn main () {
-    println!("Please input plain text");
-    let mut plain: String = String::new();
-    std::io::stdin()
-        .read_line(&mut plain)
-        .expect("Failed to read line");
-
-    while plain.len() % 16 != 0 {
-        plain.push(' ');
-    }
-
-    let key = [0; 32];
-    let key = ExpandKey(key);
-
-    let mut crypt = Vec::new();
-
-    for i in 0..(&plain.len() / 16) {
-        crypt = Encrypt(&mut plain, &key);
-    }
-    
-    let message = Decrypt(crypt, &key);
-
-    println!("{}", message);
-}*/
