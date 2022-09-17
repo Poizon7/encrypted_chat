@@ -1,7 +1,8 @@
 #![allow(non_snake_case)]
 
 extern crate nalgebra as na;
-use na::base::{Matrix4x1, SMatrix, Vector4};
+use std::net::{SocketAddr, IpAddr, Ipv4Addr};
+use std::ops::Add;
 
 use tokio::io::{AsyncWriteExt, AsyncReadExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -40,7 +41,7 @@ fn Rcon(mut byte: u8) -> u8 {
 
 fn ScheduleCore(byte: &mut [u8; 4], i: u8) {
     Rotate(byte);
-    Sbox(byte);
+    for j in 0..4 { Sbox(byte[j]); }
     byte[0] ^= Rcon(i);
 }
 
@@ -65,7 +66,9 @@ fn ExpandKey(initialKey: [u8; 32]) -> [u8; 240] {
         }
 
         if c % 32 == 16 {
-            Sbox(&mut temp);
+            for j in 0..4 {
+                Sbox(temp[j]);
+            }
         }
 
         for j in 0..4 {
@@ -83,7 +86,7 @@ fn ExpandKey(initialKey: [u8; 32]) -> [u8; 240] {
 
 // Encrypt
 
-fn Sbox(byte: &mut [u8; 4]) {
+fn Sbox(byte: u8) -> u8{
     let sbox: [u8; 256] = [
         0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab,
         0x76, 0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4,
@@ -105,60 +108,53 @@ fn Sbox(byte: &mut [u8; 4]) {
         0x16,
     ];
 
-    for i in 0..4 {
-        byte[i] = sbox[byte[i] as usize];
-    }
+    sbox[byte as usize]
 }
 
-fn ShiftRows(matrix: &mut SMatrix<u8, 4, 4>) {
-    let temp = matrix[(1, 0)];
+fn ShiftRows(matrix: &mut [u8; 16]) {
+    let temp = matrix[4];
 
-    for i in 0..3 {
-        matrix[(1, i)] = matrix[(1, i + 1)];
+    for i in 4..7 {
+        matrix[i] = matrix[i + 1];
     }
 
-    matrix[(1, 3)] = temp;
+    matrix[7] = temp;
 
-    let temp = matrix[(2, 0)];
-    matrix[(2, 0)] = matrix[(2, 2)];
-    matrix[(2, 2)] = temp;
+    let temp = matrix[8];
+    matrix[8] = matrix[10];
+    matrix[10] = temp;
 
-    let temp = matrix[(2, 1)];
-    matrix[(2, 1)] = matrix[(2, 3)];
-    matrix[(2, 3)] = temp;
+    let temp = matrix[9];
+    matrix[9] = matrix[11];
+    matrix[11] = temp;
 
-    let temp = matrix[(3, 3)];
+    let temp = matrix[15];
 
-    for i in (1..4).rev() {
-        matrix[(3, i)] = matrix[(3, i - 1)];
+    for i in (12..15).rev() {
+        matrix[(i)] = matrix[(i - 1)];
     }
 
-    matrix[(3, 0)] = temp;
+    matrix[12] = temp;
 }
 
-fn MixColumns(matrix: &mut SMatrix<u8, 4, 4>) {
+fn MixColumns(matrix: &mut [u8; 16]) {
     for i in 0..4 {
-        let c = Matrix4x1::new(
-            matrix[(0, i)],
-            matrix[(1, i)],
-            matrix[(2, i)],
-            matrix[(3, i)],
-        );
+        let c = [matrix[i * 4], matrix[(i * 4) + 1], matrix[(i * 4) + 2], matrix[(i * 4) + 3]];
 
-        matrix[(0, i)] =
-            FFM(2, c[(0, 0)]) ^ FFM(3, c[(1, 0)]) ^ FFM(1, c[(2, 0)]) ^ FFM(1, c[(3, 0)]);
-        matrix[(1, i)] =
-            FFM(1, c[(0, 0)]) ^ FFM(2, c[(1, 0)]) ^ FFM(3, c[(2, 0)]) ^ FFM(1, c[(3, 0)]);
-        matrix[(2, i)] =
-            FFM(1, c[(0, 0)]) ^ FFM(1, c[(1, 0)]) ^ FFM(2, c[(2, 0)]) ^ FFM(3, c[(3, 0)]);
-        matrix[(3, i)] =
-            FFM(3, c[(0, 0)]) ^ FFM(1, c[(1, 0)]) ^ FFM(1, c[(2, 0)]) ^ FFM(2, c[(3, 0)]);
+        matrix[i * 4] =
+            FFM(2, c[0]) ^ FFM(3, c[1]) ^ FFM(1, c[2]) ^ FFM(1, c[3]);
+        matrix[(i * 4) + 1] =
+            FFM(1, c[0]) ^ FFM(2, c[1]) ^ FFM(3, c[2]) ^ FFM(1, c[3]);
+        matrix[(i * 4) + 2] =
+            FFM(1, c[0]) ^ FFM(1, c[1]) ^ FFM(2, c[2]) ^ FFM(3, c[3]);
+        matrix[(i * 4) + 3] =
+            FFM(3, c[0]) ^ FFM(1, c[1]) ^ FFM(1, c[2]) ^ FFM(2, c[3]);
     }
 }
 
 // Decryption
 
-fn ReverseSbox(byte: &mut [u8; 4]) {
+fn ReverseSbox(byte: u8) -> u8 {
     let sbox: [u8; 256] = [
         0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab,
         0x76, 0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4,
@@ -180,65 +176,59 @@ fn ReverseSbox(byte: &mut [u8; 4]) {
         0x16,
     ];
 
-    for i in 0..4 {
-        for j in 0..=255 {
-            if byte[i] == sbox[j as usize] {
-                byte[i] = j;
-                break;
-            }
+    for j in 0..=255 {
+        if byte == sbox[j as usize] {
+            return j;
         }
     }
+
+    0
 }
 
-fn ReverseShiftRows(matrix: &mut SMatrix<u8, 4, 4>) {
-    let temp = matrix[(1, 3)];
+fn ReverseShiftRows(matrix: &mut [u8; 16]) {
+    let temp = matrix[7];
 
-    for i in (1..4).rev() {
-        matrix[(1, i)] = matrix[(1, i - 1)];
+    for i in (4..7).rev() {
+        matrix[i] = matrix[i - 1];
     }
 
-    matrix[(1, 0)] = temp;
+    matrix[4] = temp;
 
-    let temp = matrix[(2, 2)];
-    matrix[(2, 2)] = matrix[(2, 0)];
-    matrix[(2, 0)] = temp;
+    let temp = matrix[10];
+    matrix[10] = matrix[8];
+    matrix[8] = temp;
 
-    let temp = matrix[(2, 3)];
-    matrix[(2, 3)] = matrix[(2, 1)];
-    matrix[(2, 1)] = temp;
+    let temp = matrix[11];
+    matrix[11] = matrix[9];
+    matrix[9] = temp;
 
-    let temp = matrix[(3, 0)];
+    let temp = matrix[12];
 
-    for i in 0..3 {
-        matrix[(3, i)] = matrix[(3, i + 1)];
+    for i in 12..15 {
+        matrix[(i)] = matrix[(i + 1)];
     }
 
-    matrix[(3, 3)] = temp;
+    matrix[15] = temp;
 }
 
-fn ReverseMixColumns(matrix: &mut SMatrix<u8, 4, 4>) {
+fn ReverseMixColumns(matrix: &mut [u8; 16]) {
     for i in 0..4 {
-        let c = Matrix4x1::new(
-            matrix[(0, i)],
-            matrix[(1, i)],
-            matrix[(2, i)],
-            matrix[(3, i)],
-        );
+        let c = [matrix[i * 4], matrix[(i * 4) + 1], matrix[(i * 4) + 2], matrix[(i * 4) + 3]];
 
-        matrix[(0, i)] =
-            FFM(14, c[(0, 0)]) ^ FFM(11, c[(1, 0)]) ^ FFM(13, c[(2, 0)]) ^ FFM(9, c[(3, 0)]);
-        matrix[(1, i)] =
-            FFM(9, c[(0, 0)]) ^ FFM(14, c[(1, 0)]) ^ FFM(11, c[(2, 0)]) ^ FFM(13, c[(3, 0)]);
-        matrix[(2, i)] =
-            FFM(13, c[(0, 0)]) ^ FFM(9, c[(1, 0)]) ^ FFM(14, c[(2, 0)]) ^ FFM(11, c[(3, 0)]);
-        matrix[(3, i)] =
-            FFM(11, c[(0, 0)]) ^ FFM(13, c[(1, 0)]) ^ FFM(9, c[(2, 0)]) ^ FFM(14, c[(3, 0)]);
+        matrix[(i * 4)] =
+            FFM(14, c[0]) ^ FFM(11, c[1]) ^ FFM(13, c[2]) ^ FFM(9, c[3]);
+        matrix[(i * 4) + 1] =
+            FFM(9, c[0]) ^ FFM(14, c[1]) ^ FFM(11, c[2]) ^ FFM(13, c[3]);
+        matrix[(i * 4) + 2] =
+            FFM(13, c[0]) ^ FFM(9, c[1]) ^ FFM(14, c[2]) ^ FFM(11, c[3]);
+        matrix[(i * 4) + 3] =
+            FFM(11, c[0]) ^ FFM(13, c[1]) ^ FFM(9, c[2]) ^ FFM(14, c[3]);
     }
 }
 
 // Control
 
-fn PlainToMatrix(plain: &str) -> SMatrix<u8, 4, 4> {
+fn PlainToMatrix(plain: &str) -> [u8; 16] {
     let mut plain = String::from(plain.trim_end());
 
     while plain.len() < 16 {
@@ -247,19 +237,12 @@ fn PlainToMatrix(plain: &str) -> SMatrix<u8, 4, 4> {
 
     let plain = plain.as_bytes();
 
-    SMatrix::from_columns(&[
-        Vector4::new(plain[0], plain[1], plain[2], plain[3]),
-        Vector4::new(plain[4], plain[5], plain[6], plain[7]),
-        Vector4::new(plain[8], plain[9], plain[10], plain[11]),
-        Vector4::new(plain[12], plain[13], plain[14], plain[15]),
-    ])
+    [plain[0], plain[4], plain[8], plain[12], plain[1], plain[5], plain[9], plain[13], plain[2], plain[6], plain[10], plain[14], plain[3], plain[7], plain[11], plain[15]]
 }
 
-fn AddKey(matrix: &mut SMatrix<u8, 4, 4>, key: &[u8]) {
-    for i in 0..4 {
-        for j in 0..4 {
-            matrix[(i, j)] ^= key[i * 4 + j];
-        }
+fn AddKey(matrix: &mut [u8; 16], key: &[u8]) {
+    for i in 0..16 {
+        matrix[(i)] ^= key[i];
     }
 }
 
@@ -287,18 +270,12 @@ fn FFM(n1: u8, n2: u8) -> u8 {
     p
 }
 
-fn Encrypt(matrix: &mut SMatrix<u8, 4, 4>, key: &[u8; 240]) {
+fn EncryptionAlgorithm(matrix: &mut [u8; 16], key: &[u8; 240]) {
     AddKey(matrix, &key[0 .. 16]);
 
     for round in 1..=13 {
-        for i in 0..4 {
-            let mut temp = [0; 4];
-
-            for j in 0..4 { temp[j] = matrix[(i, j)]; }
-
-            Sbox(&mut temp);
-
-            for j in 0..4 { matrix[(i, j)] = temp[j]; }
+        for i in 0..16 {
+            matrix[i] = Sbox(matrix[i]);
         }
 
         ShiftRows(matrix);
@@ -306,32 +283,43 @@ fn Encrypt(matrix: &mut SMatrix<u8, 4, 4>, key: &[u8; 240]) {
         AddKey(matrix, &key[(round * 16) .. ((round * 16) + 16)]);
     }
 
-    for i in 0..4 {
-        let mut temp = [0; 4];
-
-        for j in 0..4 { temp[j] = matrix[(i, j)]; }
-
-        Sbox(&mut temp);
-
-        for j in 0..4 { matrix[(i, j)] = temp[j]; }
+    for i in 0..16 {
+        matrix[i] = Sbox(matrix[i]);
     }
 
     ShiftRows(matrix);
     AddKey(matrix, &key[224 .. 240]);
 }
 
-fn Decrypt(matrix: &mut SMatrix<u8, 4, 4>, key: &[u8; 240]) {
+fn Encrypt(plain: &mut String, key: &[u8; 240]) -> [u8; 128] {
+    let mut matrix: Vec<[u8; 16]> = Vec::new();
+
+    while plain.len() % 16 != 0 {
+        plain.push(' ');
+    }
+
+    for i in 0..(&plain.len() / 16) {
+        matrix.push(PlainToMatrix(&plain[i * 16 .. (i+1) * 16]));
+        EncryptionAlgorithm(&mut matrix[i], &key);
+    }
+
+    let mut message: [u8; 128] = [0; 128];
+
+    for i in 0..(&plain.len() / 16) {
+        for j in 0..16 {
+            message[i * 16 + j] = matrix[i][j];
+        }
+    }
+
+    message
+}
+
+fn DecryptionAlgorithm(matrix: &mut [u8; 16], key: &[u8; 240]) {
     AddKey(matrix, &key[224 .. 240]);
     ReverseShiftRows(matrix);
 
-    for i in 0..4 {
-        let mut temp = [0; 4];
-        
-        for j in 0..4 { temp[j] = matrix[(i, j)]; }
-
-        ReverseSbox(&mut temp);
-
-        for j in 0..4 { matrix[(i, j)] = temp[j]; }
+    for i in 0..16 {
+        matrix[i] = ReverseSbox(matrix[i]);
     }
 
     for round in (1..=13).rev() {
@@ -339,38 +327,42 @@ fn Decrypt(matrix: &mut SMatrix<u8, 4, 4>, key: &[u8; 240]) {
         ReverseMixColumns(matrix);
         ReverseShiftRows(matrix);
 
-        for i in 0..4 {
-            let mut temp = [0; 4];
-        
-            for j in 0..4 { temp[j] = matrix[(i, j)]; }
-
-            ReverseSbox(&mut temp);
-
-            for j in 0..4 { matrix[(i, j)] = temp[j]; }
+        for i in 0..16 {
+            matrix[i] = ReverseSbox(matrix[i]);
         }
     }
 
     AddKey(matrix, &key[0 .. 16]);
 }
 
-fn MatrixToText(matrix: SMatrix<u8, 4, 4>) -> String {
+fn Decrypt(crypt: [u8; 128], key: &[u8; 240]) -> String {
+    let mut matrix: Vec<[u8; 16]> = Vec::new();
+
+    for i in 0..crypt.len() / 16 {
+        matrix.push([crypt[i * 16], crypt[i * 16 + 4], crypt[i * 16 + 8], crypt[i * 16 + 12], crypt[i * 16 + 1], crypt[i * 16 + 5], crypt[i * 16 + 9], crypt[i * 16 + 13], crypt[i * 16 + 2], crypt[i * 16 + 6], crypt[i * 16 + 10], crypt[i * 16 + 14], crypt[i * 16 + 3], crypt[i * 16 + 7], crypt[i * 16 + 11], crypt[i * 16 + 15]]);
+    }
+
+    for i in 0..(matrix.len()) {
+        DecryptionAlgorithm(&mut matrix[i], &key);
+    }
+
+    let mut message: String = String::new();
+
+    for i in 0..matrix.len() {
+        for j in 0..16 {
+            message += &((matrix[i][j] as char).to_string());
+        }
+    }
+
+    message
+}
+
+fn MatrixToText(matrix: [u8; 16]) -> String {
     let mut text = String::new();
 
     for i in 0..4 {
         for j in 0..4 {
-            text.push(matrix[(j, i)] as char);
-        }
-    }
-
-    text
-}
-
-fn MatrixToHex(matrix: SMatrix<u8, 4, 4>) -> [u8; 16] {
-    let mut text: [u8; 16] = [0; 16];
-
-    for i in 0..4 {
-        for j in 0..4 {
-            text[i * 4 + j] = matrix[(j, i)];
+            text.push(matrix[i * 4 + j] as char);
         }
     }
 
@@ -416,19 +408,8 @@ fn EMod(m: u128, e: u128, n: u128) -> u128 {
     c
 }
 
-#[tokio::main]
-async fn main() {
-    println!("Generating keys...");
-    let (n, e, d) = GenerateKey();
-    let initialKey = [0; 32];
-    let key = ExpandKey(initialKey);
-    println!("Generated keys");
-
-    println!("Waiting for connection");
-    let listener = TcpListener::bind("127.0.0.1:6142").await.expect("Could not bind port");
-    let (mut socket, address) = listener.accept().await.expect("Could not accept listner");
-    println!("Connected");
-
+async fn Recive(address: SocketAddr, key: &[u8; 240]) {
+    let key = *key;
     let output = tokio::spawn(async move{
         let mut socket = TcpStream::connect(address).await.expect("failed to connect");
         let (mut rd, mut wr) = socket.split();
@@ -438,16 +419,73 @@ async fn main() {
         loop {
             let n = rd.read(&mut buf).await.expect("failed to read");
 
-            if n != 0 {
-                println!("> {:?}", &buf[..n]);
+            if n == 0 {
+                break;
             }
+
+            let mut crypt: [u8; 128] = [0; 128];
+
+            for i in 0..n {
+                crypt[i] = buf[i];
+            }
+
+            let message = Decrypt(crypt, &key);
+
+            println!("> {:?}", message);
         }
     });
+}
+
+#[tokio::main]
+async fn main() {
+    print!("Listen (l)/Connect (c): ");
+    let mut text: String = String::new();
+    std::io::stdin()
+        .read_line(&mut text)
+        .expect("Failed to read line");
+
+    print!("Listening IP: ");
+    let mut listeningIP: String = String::new();
+    std::io::stdin()
+        .read_line(&mut listeningIP)
+        .expect("Failed to read line");
+    
+    print!("Port: ");
+    let mut port: String = String::new();
+    std::io::stdin()
+        .read_line(&mut port)
+        .expect("Failed to read line");
+    
+    let lAddress: SocketAddr = (listeningIP + &port).parse().expect("failed to create listening address");
+    let address =  SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 0000);
+
+    println!("Generating keys...");
+    let (n, e, d) = GenerateKey();
+    let initialKey = [0; 32];
+    let key = ExpandKey(initialKey);
+    println!("Generated keys");
+
+    println!("Waiting for connection");
+    let listener = TcpListener::bind(lAddress).await.expect("Could not bind port");
+
+    let mut recive;
+
+    if text == "c" {
+        recive = Recive(address, &key);
+    }
+
+    let (mut socket, address) = listener.accept().await.expect("Could not accept listner");
+
+    if text != "c" {
+        recive = Recive(address, &key);
+    }
+
+    println!("Connected to {}", address);
 
     let (mut rd, mut wr) = socket.split();
 
     loop {
-        println!("Please input plain text");
+        print!(": ");
         let mut plain: String = String::new();
         std::io::stdin()
             .read_line(&mut plain)
@@ -457,49 +495,8 @@ async fn main() {
             break;
         }
 
-        let mut matrix: Vec<SMatrix<u8, 4, 4>> = Vec::new();
+        let message = Encrypt(&mut plain, &key);
 
-        while plain.len() % 16 != 0 {
-            plain.push(' ');
-        }
-
-        for i in 0..(&plain.len() / 16) {
-            matrix.push(PlainToMatrix(&plain[i * 16 .. (i+1) * 16]));
-            Encrypt(&mut matrix[i], &key);
-        }
-
-        for i in 0..(&plain.len() / 16) {
-            println!("{:02X}", matrix[i]);
-        }
-
-        let mut message = Vec::new();
-
-        for i in 0..(&plain.len() / 16) {
-            message[i] = MatrixToHex(matrix[i]);
-        }
-
-        for i in 0..(&plain.len() / 16) {
-            wr.write_all(&message[i]).await.expect("failed to write");
-        }
-    }
-    
-    output.await.unwrap();
-}
-/* 
-#[tokio::main]
-async fn main() -> io::Result<()> {
-    let listener = TcpListener::bind("127.0.0.1:6142").await?;
-
-    loop {
-        let (mut socket, _) = listener.accept().await?;
-
-        tokio::spawn(async move {
-            let (mut rd, mut wr) = socket.split();
-            
-            if io::copy(&mut rd, &mut wr).await.is_err() {
-                eprintln!("failed to copy");
-            }
-        });
+        wr.write_all(&message).await.expect("failed to write");
     }
 }
-*/
