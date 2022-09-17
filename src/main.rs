@@ -414,17 +414,22 @@ fn Recive(address: SocketAddr, key: &[u8; 240]) {
 
             let mut crypt = Vec::new();
 
-            for i in 0..n % 16 {
+            println!("{:?}", buf);
+
+            for i in 0..n / 16 {
                 let mut temp = [0; 16];
                 for j in 0..16 {
                     temp[j] = buf[i * 16 + j];
                 }
+                println!("{:?}", temp);
                 crypt.push(temp);
             }
 
+            println!("{:?}", crypt);
+
             let message = Decrypt(crypt, &key);
 
-            println!("> {:?}", message);
+            println!("> {}", message);
         }
     });
 }
@@ -495,7 +500,6 @@ async fn main() {
     let (mut rd, mut wr) = socket.split();
 
     loop {
-        print!(": ");
         let mut plain: String = String::new();
         std::io::stdin()
             .read_line(&mut plain)
@@ -506,6 +510,8 @@ async fn main() {
         }
 
         let message = Encrypt(&mut plain, &key);
+
+        println!("{:?}", message);
 
         for i in 0..message.len() {
             wr.write_all(&message[i]).await.expect("failed to write");
