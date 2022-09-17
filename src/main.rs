@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::ops::Index;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -418,12 +419,14 @@ fn EMod(m: u128, e: u128, n: u128) -> u128 {
     c
 }
 
-async fn Recive(address: SocketAddr, key: &[u8; 240]) {
+fn Recive(address: SocketAddr, key: &[u8; 240]) {
     let key = *key;
     let output = tokio::spawn(async move {
+        println!("Connecting");
         let mut socket = TcpStream::connect(address)
             .await
             .expect("failed to connect");
+        println!("Connected");
         let (mut rd, mut wr) = socket.split();
 
         let mut buf = vec![0; 128];
@@ -479,20 +482,35 @@ async fn main() {
     let key = ExpandKey(initialKey);
     println!("Generated keys");
 
+    let mut recive;
+
+    if text.trim() == "c" {
+        println!("Connection address: ");
+        let mut address: String = String::new();
+        std::io::stdin()
+            .read_line(&mut address)
+            .expect("Failed to read line");
+
+        recive = Recive(
+            (address.trim().to_owned() + ":" + port.trim())
+                .parse()
+                .expect("failed to create addres"),
+            &key,
+        );
+    }
+
     println!("Waiting for connection");
     let listener = TcpListener::bind(lAddress)
         .await
         .expect("Could not bind port");
 
-    let mut recive;
-
-    if text == "c" {
-        recive = Recive(address, &key);
-    }
-
     let (mut socket, address) = listener.accept().await.expect("Could not accept listner");
 
-    if text != "c" {
+    println!("{}", address);
+    let address = SocketAddr::new(address.ip(), 0000);
+    println!("{}", address);
+
+    if text.trim() != "c" {
         recive = Recive(address, &key);
     }
 
