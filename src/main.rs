@@ -1,8 +1,5 @@
 #![allow(non_snake_case)]
-
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::ops::Index;
-
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -131,7 +128,7 @@ fn ShiftRows(matrix: &mut [u8; 16]) {
 
     let temp = matrix[15];
 
-    for i in (12..15).rev() {
+    for i in (12..16).rev() {
         matrix[(i)] = matrix[(i - 1)];
     }
 
@@ -190,7 +187,7 @@ fn ReverseSbox(byte: u8) -> u8 {
 fn ReverseShiftRows(matrix: &mut [u8; 16]) {
     let temp = matrix[7];
 
-    for i in (4..7).rev() {
+    for i in (4..8).rev() {
         matrix[i] = matrix[i - 1];
     }
 
@@ -207,7 +204,7 @@ fn ReverseShiftRows(matrix: &mut [u8; 16]) {
     let temp = matrix[12];
 
     for i in 12..15 {
-        matrix[(i)] = matrix[(i + 1)];
+        matrix[i] = matrix[i + 1];
     }
 
     matrix[15] = temp;
@@ -297,7 +294,7 @@ fn EncryptionAlgorithm(matrix: &mut [u8; 16], key: &[u8; 240]) {
     AddKey(matrix, &key[224..240]);
 }
 
-fn Encrypt(plain: &mut String, key: &[u8; 240]) -> [u8; 128] {
+fn Encrypt(plain: &mut String, key: &[u8; 240]) -> Vec<[u8; 16]> {
     let mut matrix: Vec<[u8; 16]> = Vec::new();
 
     while plain.len() % 16 != 0 {
@@ -309,12 +306,10 @@ fn Encrypt(plain: &mut String, key: &[u8; 240]) -> [u8; 128] {
         EncryptionAlgorithm(&mut matrix[i], &key);
     }
 
-    let mut message: [u8; 128] = [0; 128];
+    let mut message = Vec::new();
 
     for i in 0..(&plain.len() / 16) {
-        for j in 0..16 {
-            message[i * 16 + j] = matrix[i][j];
-        }
+         message.push(matrix[i]);
     }
 
     message
@@ -341,39 +336,18 @@ fn DecryptionAlgorithm(matrix: &mut [u8; 16], key: &[u8; 240]) {
     AddKey(matrix, &key[0..16]);
 }
 
-fn Decrypt(crypt: [u8; 128], key: &[u8; 240]) -> String {
-    let mut matrix: Vec<[u8; 16]> = Vec::new();
-
-    for i in 0..crypt.len() / 16 {
-        matrix.push([
-            crypt[i * 16],
-            crypt[i * 16 + 4],
-            crypt[i * 16 + 8],
-            crypt[i * 16 + 12],
-            crypt[i * 16 + 1],
-            crypt[i * 16 + 5],
-            crypt[i * 16 + 9],
-            crypt[i * 16 + 13],
-            crypt[i * 16 + 2],
-            crypt[i * 16 + 6],
-            crypt[i * 16 + 10],
-            crypt[i * 16 + 14],
-            crypt[i * 16 + 3],
-            crypt[i * 16 + 7],
-            crypt[i * 16 + 11],
-            crypt[i * 16 + 15],
-        ]);
-    }
-
-    for i in 0..(matrix.len()) {
-        DecryptionAlgorithm(&mut matrix[i], &key);
+fn Decrypt(mut crypt: Vec<[u8; 16]>, key: &[u8; 240]) -> String {
+    for i in 0..(crypt.len()) {
+        DecryptionAlgorithm(&mut crypt[i], &key);
     }
 
     let mut message: String = String::new();
 
-    for i in 0..matrix.len() {
-        for j in 0..16 {
-            message += &((matrix[i][j] as char).to_string());
+    for i in 0..crypt.len() {
+        for j in 0..4 {
+            for k in 0..4 {
+                message += &((crypt[i][k * 4 + j] as char).to_string());
+            }
         }
     }
 
@@ -438,10 +412,14 @@ fn Recive(address: SocketAddr, key: &[u8; 240]) {
                 break;
             }
 
-            let mut crypt: [u8; 128] = [0; 128];
+            let mut crypt = Vec::new();
 
-            for i in 0..n {
-                crypt[i] = buf[i];
+            for i in 0..n % 16 {
+                let mut temp = [0; 16];
+                for j in 0..16 {
+                    temp[j] = buf[i * 16 + j];
+                }
+                crypt.push(temp);
             }
 
             let message = Decrypt(crypt, &key);
@@ -482,8 +460,6 @@ async fn main() {
     let key = ExpandKey(initialKey);
     println!("Generated keys");
 
-    let mut recive;
-
     if text.trim() == "c" {
         println!("Connection address: ");
         let mut address: String = String::new();
@@ -491,7 +467,7 @@ async fn main() {
             .read_line(&mut address)
             .expect("Failed to read line");
 
-        recive = Recive(
+        Recive(
             (address.trim().to_owned() + ":" + port.trim())
                 .parse()
                 .expect("failed to create addres"),
@@ -507,11 +483,11 @@ async fn main() {
     let (mut socket, address) = listener.accept().await.expect("Could not accept listner");
 
     println!("{}", address);
-    let address = SocketAddr::new(address.ip(), 0000);
+    let address = SocketAddr::new(address.ip(), port.trim().parse().expect("failed to pares port"));
     println!("{}", address);
 
     if text.trim() != "c" {
-        recive = Recive(address, &key);
+        Recive(address, &key);
     }
 
     println!("Connected to {}", address);
@@ -531,6 +507,34 @@ async fn main() {
 
         let message = Encrypt(&mut plain, &key);
 
-        wr.write_all(&message).await.expect("failed to write");
+        for i in 0..message.len() {
+            wr.write_all(&message[i]).await.expect("failed to write");
+        }
     }
 }
+
+/*
+fn main () {
+    println!("Please input plain text");
+    let mut plain: String = String::new();
+    std::io::stdin()
+        .read_line(&mut plain)
+        .expect("Failed to read line");
+
+    while plain.len() % 16 != 0 {
+        plain.push(' ');
+    }
+
+    let key = [0; 32];
+    let key = ExpandKey(key);
+
+    let mut crypt = Vec::new();
+
+    for i in 0..(&plain.len() / 16) {
+        crypt = Encrypt(&mut plain, &key);
+    }
+    
+    let message = Decrypt(crypt, &key);
+
+    println!("{}", message);
+}*/
