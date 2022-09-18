@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::env;
+use std::net::SocketAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -393,9 +394,9 @@ fn EMod(m: u128, e: u128, n: u128) -> u128 {
     c
 }
 
-fn Recive(address: SocketAddr, key: &[u8; 240]) {
-    let key = *key;
-    let output = tokio::spawn(async move {
+fn Recive(address: SocketAddr, key: &[u8; 240], con: bool, n: u128, e: u128, d: u128) {
+    let mut key = *key;
+    tokio::spawn(async move {
         println!("Connecting");
         let mut socket = TcpStream::connect(address)
             .await
@@ -403,7 +404,19 @@ fn Recive(address: SocketAddr, key: &[u8; 240]) {
         println!("Connected");
         let (mut rd, mut wr) = socket.split();
 
+        wr.write_u128(n).await.expect("failed to send n");
+        wr.write_u128(e).await.expect("failed to send e");
+
         let mut buf = vec![0; 128];
+
+        if con {
+            let mut initKey = [0; 32];
+            for i in 0..initKey.len() {
+                initKey[i] =
+                    EMod(rd.read_u128().await.expect("failed to read aes key"), d, n) as u8;
+            }
+            key = ExpandKey(initKey);
+        }
 
         loop {
             let n = rd.read(&mut buf).await.expect("failed to read");
@@ -431,47 +444,41 @@ fn Recive(address: SocketAddr, key: &[u8; 240]) {
 
 #[tokio::main]
 async fn main() {
-    println!("Listen (l)/Connect (c): ");
-    let mut text: String = String::new();
-    std::io::stdin()
-        .read_line(&mut text)
-        .expect("Failed to read line");
+    let args: Vec<String> = env::args().collect();
 
-    println!("Listening IP: ");
-    let mut listeningIP: String = String::new();
-    std::io::stdin()
-        .read_line(&mut listeningIP)
-        .expect("Failed to read line");
+    let index = args.iter().position(|x| x == "-ip").unwrap();
+    let ip = &args[index + 1];
 
-    println!("Port: ");
-    let mut port: String = String::new();
-    std::io::stdin()
-        .read_line(&mut port)
-        .expect("Failed to read line");
+    let index = args.iter().position(|x| x == "-p").unwrap();
+    let port = &args[index + 1];
 
-    let lAddress: SocketAddr = (listeningIP.trim().to_owned() + ":" + &port.trim())
-        .parse()
-        .expect("failed to create listening address");
-    let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 0000);
+    let lAddress: SocketAddr = SocketAddr::new(
+        ip.parse().expect("failed to parse ip"),
+        port.trim().parse().expect("failed to parse port"),
+    );
 
-    println!("Generating keys...");
+    let mut toConnect = false;
+    let mut connect = String::new();
+    if args.iter().any(|x| x == "-c") {
+        toConnect = true;
+        let index = args.iter().position(|x| x == "-c").unwrap();
+        connect = args[index + 1].to_owned();
+    }
+
     let (n, e, d) = GenerateKey();
     let initialKey = [0; 32];
     let key = ExpandKey(initialKey);
-    println!("Generated keys");
 
-    if text.trim() == "c" {
-        println!("Connection address: ");
-        let mut address: String = String::new();
-        std::io::stdin()
-            .read_line(&mut address)
-            .expect("Failed to read line");
-
+    if toConnect {
         Recive(
-            (address.trim().to_owned() + ":" + port.trim())
+            (connect.trim().to_owned() + ":" + port.trim())
                 .parse()
                 .expect("failed to create addres"),
             &key,
+            toConnect,
+            n,
+            e,
+            d,
         );
     }
 
@@ -485,17 +492,27 @@ async fn main() {
     println!("{}", address);
     let address = SocketAddr::new(
         address.ip(),
-        port.trim().parse().expect("failed to pares port"),
+        port.trim().parse().expect("failed to parse port"),
     );
     println!("{}", address);
 
-    if text.trim() != "c" {
-        Recive(address, &key);
+    if !toConnect {
+        Recive(address, &key, toConnect, n, e, d);
     }
 
     println!("Connected to {}", address);
 
     let (mut rd, mut wr) = socket.split();
+    let pn = rd.read_u128().await.expect("failed to read n");
+    let pe = rd.read_u128().await.expect("failed to read e");
+
+    if !toConnect {
+        for i in 0..initialKey.len() {
+            wr.write_u128(EMod(initialKey[i] as u128, pe, pn))
+                .await
+                .expect("failed to write aes key");
+        }
+    }
 
     loop {
         let mut plain: String = String::new();
@@ -508,9 +525,15 @@ async fn main() {
         }
 
         let message = Encrypt(&mut plain, &key);
-
-        println!("{:?}", message);
-
+        /*
+                let mut temp = String::new();
+                for i in 0..message.len() {
+                    for j in 0..16 {
+                        temp += &(message[i][j] as char).to_string();
+                    }
+                }
+                println!("{}", temp);
+        */
         for i in 0..message.len() {
             wr.write_all(&message[i]).await.expect("failed to write");
         }
