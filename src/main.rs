@@ -1,5 +1,7 @@
-use spectrum::cryptography::aes::KeySize;
-use spectrum::cryptography::{aes, rsa};
+use spectrum::cryptography::{
+    aes::{self, InitKey},
+    rsa,
+};
 use std::env;
 use std::net::SocketAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -23,15 +25,15 @@ async fn send_init_key<const N: usize>(
 }
 
 async fn recive_init_key(
-    init_key: &mut KeySize,
+    init_key: &mut InitKey,
     rd: &mut ReadHalf<'_>,
-    tx: Sender<aes::KeySize>,
+    tx: Sender<aes::InitKey>,
     d: u128,
     n: u128,
 ) {
     *init_key = match init_key {
-        aes::KeySize::Bit128(init_key) => match init_key {
-            Some(init_key) => aes::KeySize::Bit128(Some(*init_key)),
+        aes::InitKey::Bit128(init_key) => match init_key {
+            Some(init_key) => aes::InitKey::Bit128(Some(*init_key)),
             None => {
                 let mut init_key = [0; 16];
                 for i in 0..16 {
@@ -39,13 +41,13 @@ async fn recive_init_key(
                         rsa::Decrypt(rd.read_u128().await.expect("failed to read aes key"), d, n)
                             as u8;
                 }
-                let init_key = aes::KeySize::Bit128(Some(init_key));
+                let init_key = aes::InitKey::Bit128(Some(init_key));
                 tx.send(init_key.clone()).expect("failed to send");
                 init_key
             }
         },
-        aes::KeySize::Bit192(init_key) => match init_key {
-            Some(init_key) => aes::KeySize::Bit192(Some(*init_key)),
+        aes::InitKey::Bit192(init_key) => match init_key {
+            Some(init_key) => aes::InitKey::Bit192(Some(*init_key)),
             None => {
                 let mut init_key = [0; 24];
                 for i in 0..24 {
@@ -53,13 +55,13 @@ async fn recive_init_key(
                         rsa::Decrypt(rd.read_u128().await.expect("failed to read aes key"), d, n)
                             as u8;
                 }
-                let init_key = aes::KeySize::Bit192(Some(init_key));
+                let init_key = aes::InitKey::Bit192(Some(init_key));
                 tx.send(init_key.clone()).expect("failed to send");
                 init_key
             }
         },
-        aes::KeySize::Bit256(init_key) => match init_key {
-            Some(init_key) => aes::KeySize::Bit256(Some(*init_key)),
+        aes::InitKey::Bit256(init_key) => match init_key {
+            Some(init_key) => aes::InitKey::Bit256(Some(*init_key)),
             None => {
                 let mut init_key = [0; 32];
                 for i in 0..32 {
@@ -67,7 +69,7 @@ async fn recive_init_key(
                         rsa::Decrypt(rd.read_u128().await.expect("failed to read aes key"), d, n)
                             as u8;
                 }
-                let init_key = aes::KeySize::Bit256(Some(init_key));
+                let init_key = aes::InitKey::Bit256(Some(init_key));
                 tx.send(init_key.clone()).expect("failed to send");
                 init_key
             }
@@ -77,11 +79,11 @@ async fn recive_init_key(
 
 fn recive(
     address: SocketAddr,
-    mut init_key: aes::KeySize,
+    mut init_key: aes::InitKey,
     n: u128,
     e: u128,
     d: u128,
-    tx: Sender<aes::KeySize>,
+    tx: Sender<aes::InitKey>,
 ) {
     tokio::spawn(async move {
         println!("Connecting");
@@ -98,7 +100,7 @@ fn recive(
 
         recive_init_key(&mut init_key, &mut rd, tx, d, n).await;
 
-        let key = aes::GenerateKey(&mut init_key);
+        let key = aes::generate_key(&mut init_key);
 
         loop {
             let n = rd.read(&mut buf).await.expect("failed to read");
@@ -117,7 +119,7 @@ fn recive(
                 crypt.push(temp);
             }
 
-            let message = aes::Decrypt(crypt, &key);
+            let message = aes::decrypt(crypt, &key);
 
             println!("> {}", message);
         }
@@ -139,7 +141,7 @@ async fn main() {
         .parse()
         .expect("failed to parse address");
 
-    let mut init_key = aes::KeySize::Bit256(None);
+    let mut init_key = aes::InitKey::Bit256(None);
 
     // If there is a connection address -> initialise connection address with that value otherwise none
     let connection_address = if let Some(index) = args.iter().position(|x| x == "-c") {
@@ -149,13 +151,13 @@ async fn main() {
                 .unwrap(),
         )
     } else {
-        aes::GenerateKey(&mut init_key);
+        aes::generate_key(&mut init_key);
         None
     };
 
     let (n, e, d) = rsa::GenerateKey();
-    let (tx, rx) = oneshot::channel::<aes::KeySize>();
-    let (tx2, _rx2) = oneshot::channel::<aes::KeySize>();
+    let (tx, rx) = oneshot::channel::<aes::InitKey>();
+    let (tx2, _rx2) = oneshot::channel::<aes::InitKey>();
 
     // Start listener
     let listening_handler = tokio::spawn(async move {
@@ -191,14 +193,14 @@ async fn main() {
 
     let key = if connection_address.is_none() {
         match init_key {
-            aes::KeySize::Bit128(init_key) => send_init_key(&init_key, &mut wr, pe, pn).await,
-            aes::KeySize::Bit192(init_key) => send_init_key(&init_key, &mut wr, pe, pn).await,
-            aes::KeySize::Bit256(init_key) => send_init_key(&init_key, &mut wr, pe, pn).await,
+            aes::InitKey::Bit128(init_key) => send_init_key(&init_key, &mut wr, pe, pn).await,
+            aes::InitKey::Bit192(init_key) => send_init_key(&init_key, &mut wr, pe, pn).await,
+            aes::InitKey::Bit256(init_key) => send_init_key(&init_key, &mut wr, pe, pn).await,
         }
-        aes::GenerateKey(&mut init_key)
+        aes::generate_key(&mut init_key)
     } else {
         let mut init_key = rx.await.expect("sender droped");
-        aes::GenerateKey(&mut init_key)
+        aes::generate_key(&mut init_key)
     };
 
     // Comunication loop
@@ -212,7 +214,7 @@ async fn main() {
             break;
         }
 
-        let message = aes::Encrypt(&mut plain, &key);
+        let message = aes::encrypt(&mut plain, &key);
 
         for i in 0..message.len() {
             wr.write_all(&message[i]).await.expect("failed to write");
